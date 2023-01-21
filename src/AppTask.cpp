@@ -67,18 +67,10 @@
 #define APP_FUNCTION_BUTTON &sl_button_btn0
 #define APP_TOGGLE_OCCUPANCY_BUTTON &sl_button_btn1
 
-#if 0
-using chip::app::Clusters::DoorLock::DlLockState;
-using chip::app::Clusters::DoorLock::DlOperationError;
-using chip::app::Clusters::DoorLock::DlOperationSource;
-#endif
 
 using namespace chip;
 using namespace ::chip::DeviceLayer;
 using namespace ::chip::DeviceLayer::Internal;
-#if 0
-using namespace EFR32DoorLock::LockInitParams;
-#endif
 
 namespace {
 
@@ -146,9 +138,6 @@ Identify gIdentify = {
 
 } // namespace
 
-#if 0
-using namespace chip::TLV;type filter text
-#endif
 using namespace ::chip::DeviceLayer;
 
 AppTask AppTask::sAppTask;
@@ -168,11 +157,14 @@ CHIP_ERROR AppTask::Init()
         appError(err);
     }
 
-    sAppTask.sOccupancyTimer = xTimerCreate("OccupancyTimer",
-        10,                    // Default timer period (mS)
-        true,                  // reload timer
+    endpoint = 1;
+    occupancy = false;
+    occupancyTimeout = 15*1000;
+    occupancyTimer = xTimerCreate("OccupancyTimer",
+        occupancyTimeout / portTICK_PERIOD_MS,
+        false,                 // reload timer
         (void *) this,         // Timer Id
-        OccupancyTimerHandler); // Timer callback handler)
+        OccupancyTimerHandler);
 
 
 #if defined(ENABLE_CHIP_SHELL)
@@ -184,87 +176,6 @@ CHIP_ERROR AppTask::Init()
     }
 #endif // ENABLE_CHIP_SHELL
 
-#if 0
-    // Initial lock state
-    chip::app::DataModel::Nullable<chip::app::Clusters::DoorLock::DlLockState> state;
-    chip::EndpointId endpointId{ 1 };
-    chip::DeviceLayer::PlatformMgr().LockChipStack();
-    chip::app::Clusters::DoorLock::Attributes::LockState::Get(endpointId, state);
-
-    uint8_t numberOfCredentialsPerUser = 0;
-    if (!DoorLockServer::Instance().GetNumberOfCredentialsSupportedPerUser(endpointId, numberOfCredentialsPerUser))
-    {
-        ChipLogError(Zcl,
-                     "Unable to get number of credentials supported per user when initializing lock endpoint, defaulting to 5 "
-                     "[endpointId=%d]",
-                     endpointId);
-        numberOfCredentialsPerUser = 5;
-    }
-
-    uint16_t numberOfUsers = 0;
-    if (!DoorLockServer::Instance().GetNumberOfUserSupported(endpointId, numberOfUsers))
-    {
-        ChipLogError(Zcl,
-                     "Unable to get number of supported users when initializing lock endpoint, defaulting to 10 [endpointId=%d]",
-                     endpointId);
-        numberOfUsers = 10;
-    }
-
-    uint8_t numberOfWeekdaySchedulesPerUser = 0;
-    if (!DoorLockServer::Instance().GetNumberOfWeekDaySchedulesPerUserSupported(endpointId, numberOfWeekdaySchedulesPerUser))
-    {
-        ChipLogError(
-            Zcl,
-            "Unable to get number of supported weekday schedules when initializing lock endpoint, defaulting to 10 [endpointId=%d]",
-            endpointId);
-        numberOfWeekdaySchedulesPerUser = 10;
-    }
-
-    uint8_t numberOfYeardaySchedulesPerUser = 0;
-    if (!DoorLockServer::Instance().GetNumberOfYearDaySchedulesPerUserSupported(endpointId, numberOfYeardaySchedulesPerUser))
-    {
-        ChipLogError(
-            Zcl,
-            "Unable to get number of supported yearday schedules when initializing lock endpoint, defaulting to 10 [endpointId=%d]",
-            endpointId);
-        numberOfYeardaySchedulesPerUser = 10;
-    }
-
-    uint8_t numberOfHolidaySchedules = 0;
-    if (!DoorLockServer::Instance().GetNumberOfHolidaySchedulesSupported(endpointId, numberOfHolidaySchedules))
-    {
-        ChipLogError(
-            Zcl,
-            "Unable to get number of supported holiday schedules when initializing lock endpoint, defaulting to 10 [endpointId=%d]",
-            endpointId);
-        numberOfHolidaySchedules = 10;
-    }
-
-    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
-
-    err = LockMgr().Init(state,
-                         ParamBuilder()
-                             .SetNumberOfUsers(numberOfUsers)
-                             .SetNumberOfCredentialsPerUser(numberOfCredentialsPerUser)
-                             .SetNumberOfWeekdaySchedulesPerUser(numberOfWeekdaySchedulesPerUser)
-                             .SetNumberOfYeardaySchedulesPerUser(numberOfYeardaySchedulesPerUser)
-                             .SetNumberOfHolidaySchedules(numberOfHolidaySchedules)
-                             .GetLockParam());
-
-    if (err != CHIP_NO_ERROR)
-    {
-        EFR32_LOG("LockMgr().Init() failed");
-        appError(err);
-    }
-
-    LockMgr().SetCallbacks(ActionInitiated, ActionCompleted);
-
-#ifdef ENABLE_WSTK_LEDS
-    // Initialize LEDs
-    sLockLED.Init(LOCK_STATE_LED);
-    sLockLED.Set(state.Value() == DlLockState::kUnlocked);
-#endif // ENABLE_WSTK_LEDS
-#endif
 
     chip::DeviceLayer::PlatformMgr().ScheduleWork(UpdateClusterState, reinterpret_cast<intptr_t>(nullptr));
 
@@ -296,11 +207,6 @@ void AppTask::AppTaskMain(void * pvParameter)
 
     EFR32_LOG("App Task started");
 
-#if 0
-    // Users and credentials should be checked once from nvm flash on boot
-    LockMgr().ReadConfigValues();
-#endif
-
     while (true)
     {
         BaseType_t eventReceived = xQueueReceive(sAppEventQueue, &event, pdMS_TO_TICKS(10));
@@ -330,47 +236,6 @@ void AppTask::OnIdentifyStop(Identify * identify)
 #endif
 }
 
-#if 0
-void AppTask::LockActionEventHandler(AppEvent * aEvent)
-{
-    bool initiated = false;
-    LockManager::Action_t action;
-    int32_t actor;
-    CHIP_ERROR err = CHIP_NO_ERROR;
-
-    if (aEvent->Type == AppEvent::kEventType_Lock)
-    {
-        action = static_cast<LockManager::Action_t>(aEvent->LockEvent.Action);
-        actor  = aEvent->LockEvent.Actor;
-    }
-    else if (aEvent->Type == AppEvent::kEventType_Button)
-    {
-        if (LockMgr().NextState() == true)
-        {
-            action = LockManager::LOCK_ACTION;
-        }
-        else
-        {
-            action = LockManager::UNLOCK_ACTION;
-        }
-        actor = AppEvent::kEventType_Button;
-    }
-    else
-    {
-        err = APP_ERROR_UNHANDLED_EVENT;
-    }
-
-    if (err == CHIP_NO_ERROR)
-    {
-        initiated = LockMgr().InitiateAction(actor, action);
-
-        if (!initiated)
-        {
-            EFR32_LOG("Action is already in progress or active.");
-        }
-    }
-}
-#endif
 
 void AppTask::ButtonEventHandler(const sl_button_t * buttonHandle, uint8_t btnAction)
 {
@@ -379,48 +244,59 @@ void AppTask::ButtonEventHandler(const sl_button_t * buttonHandle, uint8_t btnAc
         return;
     }
 
-    AppEvent button_event           = {};
-    button_event.Type               = AppEvent::kEventType_Button;
-    button_event.ButtonEvent.Action = btnAction;
-
     if (buttonHandle == APP_FUNCTION_BUTTON)
     {
-        button_event.Handler = BaseApplication::ButtonHandler;
-        sAppTask.PostEvent(&button_event);
+        AppEvent event = {};
+        event.Type = AppEvent::kEventType_Button;
+        event.ButtonEvent.Action = btnAction;
+        event.Handler = BaseApplication::ButtonHandler;
+        sAppTask.PostEvent(&event);
     }
     else if (buttonHandle == APP_TOGGLE_OCCUPANCY_BUTTON)
     {
-
+        sAppTask.PostMotionEvent();
     }
 }
 
-
-void AppTask::UpdateClusterState(intptr_t context)
+void AppTask::UpdateClusterState(intptr_t notused)
 {
-#if 0
-    bool unlocked        = LockMgr().NextState();
-    DlLockState newState = unlocked ? DlLockState::kUnlocked : DlLockState::kLocked;
-
-    DlOperationSource source = DlOperationSource::kUnspecified;
-
-    // write the new lock value
-    EmberAfStatus status =
-        DoorLockServer::Instance().SetLockState(1, newState, source) ? EMBER_ZCL_STATUS_SUCCESS : EMBER_ZCL_STATUS_FAILURE;
-
-    if (status != EMBER_ZCL_STATUS_SUCCESS)
+    if (PlatformMgr().TryLockChipStack())
     {
-        EFR32_LOG("ERR: updating lock state %x", status);
+        // State is a bitmap, bit 0 is for occupancy
+        EmberAfStatus status = app::Clusters::OccupancySensing::Attributes::Occupancy::Set(sAppTask.endpoint, sAppTask.occupancy ? 1: 0);
+        EFR32_LOG("Occupancy status = %d", status);
+        PlatformMgr().UnlockChipStack();
     }
-#endif
+    else
+    {
+        EFR32_LOG("Occupancy failed to lock stack");
+    }
+
+    if (sAppTask.occupancy)
+    {
+        // Occupancy has become true, so start occupancy timer
+        xTimerStart(sAppTask.occupancyTimer, 100);
+    }
 }
 
 void AppTask::OccupancyTimerHandler(TimerHandle_t xTimer)
 {
+    sAppTask.occupancy = false;
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(UpdateClusterState, reinterpret_cast<intptr_t>(nullptr));
 }
 
 void AppTask::MotionEventHandler(AppEvent *event)
 {
-
+    if (sAppTask.occupancy)
+    {
+        // Just extend timer
+        xTimerReset(sAppTask.occupancyTimer, 100);
+    }
+    else
+    {
+        sAppTask.occupancy = true;
+        chip::DeviceLayer::PlatformMgr().ScheduleWork(UpdateClusterState, reinterpret_cast<intptr_t>(nullptr));
+    }
 }
 
 void AppTask::PostMotionEvent()

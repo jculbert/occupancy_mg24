@@ -60,7 +60,10 @@ class AppTask : public BaseApplication
 {
 
 public:
-    TimerHandle_t sOccupancyTimer;
+    uint32_t endpoint;
+    TimerHandle_t occupancyTimer;
+    uint32_t occupancyTimeout;
+    int occupancy;
 
     AppTask() = default;
 
@@ -105,6 +108,8 @@ public:
 
     static void PostMotionEvent();
 
+    static void UpdateClusterState(intptr_t notused);
+
 private:
     static AppTask sAppTask;
 
@@ -131,11 +136,4 @@ private:
      * @param aEvent button event being processed
      */
     static void SwitchActionEventHandler(AppEvent * aEvent);
-
-    /**
-     * @brief Update Cluster State
-     *
-     * @param context current context
-     */
-    static void UpdateClusterState(intptr_t context);
 };
