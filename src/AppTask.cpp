@@ -260,23 +260,9 @@ void AppTask::ButtonEventHandler(const sl_button_t * buttonHandle, uint8_t btnAc
 
 void AppTask::UpdateClusterState(intptr_t notused)
 {
-    if (PlatformMgr().TryLockChipStack())
-    {
-        // State is a bitmap, bit 0 is for occupancy
-        EmberAfStatus status = app::Clusters::OccupancySensing::Attributes::Occupancy::Set(sAppTask.endpoint, sAppTask.occupancy ? 1: 0);
-        EFR32_LOG("Occupancy status = %d", status);
-        PlatformMgr().UnlockChipStack();
-    }
-    else
-    {
-        EFR32_LOG("Occupancy failed to lock stack");
-    }
-
-    if (sAppTask.occupancy)
-    {
-        // Occupancy has become true, so start occupancy timer
-        xTimerStart(sAppTask.occupancyTimer, 100);
-    }
+    // State is a bitmap, bit 0 is for occupancy
+    EmberAfStatus status = app::Clusters::OccupancySensing::Attributes::Occupancy::Set(sAppTask.endpoint, sAppTask.occupancy ? 1: 0);
+    EFR32_LOG("Occupancy status = %d", status);
 }
 
 void AppTask::OccupancyTimerHandler(TimerHandle_t xTimer)
@@ -294,6 +280,7 @@ void AppTask::MotionEventHandler(AppEvent *event)
     }
     else
     {
+        xTimerStart(sAppTask.occupancyTimer, 100);
         sAppTask.occupancy = true;
         chip::DeviceLayer::PlatformMgr().ScheduleWork(UpdateClusterState, reinterpret_cast<intptr_t>(nullptr));
     }
